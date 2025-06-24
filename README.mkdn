@@ -1,36 +1,329 @@
-LineageOS
-===========
+# AxionOS
 
-Getting started
----------------
+## Getting Started
 
-To get started with Android/LineageOS, you'll need to get familiar with [Source Control Tools](https://source.android.com/setup/develop).
+To get started with **AxionOS**, you'll need to be familiar with [Source Control Tools](https://source.android.com/setup/develop).
 
-To initialize your local repository using the LineageOS trees, use a command like this:
+### Initializing the Source
+
+Initialize your local repository using the AxionOS manifest:
+
+```bash
+repo init -u https://github.com/AxionAOSP/android.git -b lineage-23.0 --git-lfs
 ```
-repo init -u https://github.com/LineageOS/android.git -b lineage-22.2 --git-lfs
-```
-Then to sync up:
-```
+
+Then sync the source:
+
+```bash
 repo sync
 ```
-Please see the [LineageOS Wiki](https://wiki.lineageos.org/) for building instructions, by device.
 
+## Build Environment Setup
 
-Submitting patches
-------------------
-Patches are always welcome! Please submit your patches via LineageOS Gerrit!
+Make sure your build environment is properly set up by following the [LineageOS build guide](https://wiki.lineageos.org/devices/).
 
-Simply follow our guide on [how to submit patches](https://wiki.lineageos.org/submitting-patch-howto.html).
+Before building, configure the environment:
 
-To view the status of your and others' patches, visit [LineageOS Gerrit Code Review](https://review.lineageos.org/).
+```bash
+. build/envsetup.sh
+```
 
+## Device Flags
 
-Buildbot
---------
+Modify your device trees to inherit **LineageOS** common settings and disable **EPPE** (if applicable):
 
-All supported devices are built weekly and periodically as changes are committed to ensure the source trees remain buildable.
+```make
+TARGET_DISABLE_EPPE := true
+$(call inherit-product, vendor/lineage/config/common_full_phone.mk)
+```
 
-You can view the current build statuses at [LineageOS Buildkite](https://buildkite.com/lineageos).
+### AxionOS-Specific Flags
 
-Builds produced weekly by the buildbot can be downloaded from [LineageOS downloads](https://download.lineageos.org/).
+These flags are needed for About Phone section UI and GMS framework.
+
+#### 📷 Camera Flags
+
+```make
+# Define rear camera specs (multiple sensors supported)
+AXION_CAMERA_REAR_INFO := 50,48  # Example: 50MP + 48MP
+
+# Define front camera specs
+AXION_CAMERA_FRONT_INFO := 42  # Example: 42MP
+```
+
+#### 👤 Device Maintainer & Processor Info Flags
+
+```make
+# Maintainer name (use "_" for spaces, e.g., "rmp_22" → "rmp 22" in UI)
+AXION_MAINTAINER := rmp
+
+# Processor name (use "_" for spaces)
+AXION_PROCESSOR := Snapdragon_CPU_1
+```
+
+### 🪟 Enabling blur
+
+To enable blur, add the following flag in your device's `lineage_device.mk`:
+
+```make
+TARGET_ENABLE_BLUR := true
+```
+
+### 🎵 ViperFX Integration
+
+To include **ViPER4AndroidFX**, enable the following flag in your device's `lineage_device.mk`:
+
+```make
+TARGET_INCLUDE_VIPERFX := true
+```
+
+By default, this flag is **disabled** (`false`). If enabled, make sure your device includes the necessary drivers and libraries.
+
+For full setup instructions, follow the [ViPER4AndroidFX ReadMe](https://github.com/AxionAOSP/android_packages_apps_ViPER4AndroidFX/blob/v4a/README.md).
+
+---
+
+# ⚛️ AxionOS Flags
+
+AxionOS introduces specific CPU affinity settings to optimize system performance. These flags allow builders to define small and big core groups for scheduling critical processes like **SurfaceFlinger**, **HwComposer**, and **RenderEngine** to big cores.
+
+## ⚡ Defining GameSpace Bypass charge support in `lineage_device.mk`
+
+Builders **must** define wether their device supports bypass charging in their device tree:
+
+```make
+# if device has the following nodes: 
+# /sys/class/power_supply/battery/input_suspend 
+# /sys/class/qcom-battery/input_suspend
+# bypass charging can be supported
+BYPASS_CHARGE_SUPPORTED := true (false by default)
+```
+Builders **must** also add bypass charging rules on their device tree:
+
+```init.te
+# input_suspend_label is the label assigned to /sys/class/power_supply/battery/input_suspend which varies on some device tree
+allow init <input_suspend_label>:file rw_file_perms;
+```
+
+## 🔧 Defining CPU Core Groups in `lineage_device.mk`
+
+Builders **must** define the CPU core groups in their device tree:
+
+```make
+# Define small and big core groups (used for setting processes affinity)
+AXION_CPU_SMALL_CORES := 0,1,2,3
+# CPU used by critical tasks like SystemUI animations/surfaceflinger etc.
+AXION_CPU_BIG_CORES := 4,5,6,7 (builders can include prime cluster cores)
+
+## CPUsets configuration
+# CPUset used for bg/audio cpusets 
+AXION_CPU_BG := 0-2
+# CPUset used for foreground cpusets
+AXION_CPU_FG ?= 0-7
+# CPUset that will be used when limiting other cpusets except top-app
+AXION_CPU_LIMIT_BG := 0-1
+# CPUset that will be used to unlimit critical cpusets for UI
+AXION_CPU_UNLIMIT_UI ?= 0-7
+# CPUset that will be used when limiting critical cpusets for UI
+AXION_CPU_LIMIT_UI ?= 0-4
+# CPUset that will be used for critical display processes
+AXION_CPU_DISPLAY ?= 4-7
+# CPUset that will be used for audio processes e.g. audioserver
+AXION_CPU_AUDIO ?= 0-3
+
+# Wether to enable debugging for adb logcat purposes
+AXION_DEBUGGING_ENABLED := true/false
+```
+
+**Do not use `?=` here**, to make sure that it overrides AxionOS defaults
+
+## 💡 Purpose
+
+These properties are used for:
+- **Used by Boostframework**.
+- **Affining SurfaceFlinger, HwComposer, and RenderEngine to big cores**.
+
+If your device has a different core configuration, override the values in `lineage_device.mk`.
+
+# 🚀 Improving System Performance
+
+AxionOS promotes the use of **`libperfmgr`** over the traditional **QCOM Perf HAL** because `libperfmgr` hints are more flexible and easier to customize for specific use cases.
+
+Enhancing fling and scroll responsiveness can significantly improve user experience, particularly in animation-heavy apps and fast-scroll scenarios. AxionOS includes several key optimizations to address this.
+
+---
+
+## 1. `libperfmgr`-Based Fling and Scroll Optimizations
+
+AxionOS introduces custom performance hints to improve fling and scroll behavior, inspired by QCOM's performance strategies.
+
+### References
+- [Use efficient CPU frequencies for `FIXED_PERFORMANCE` hint](https://github.com/AxionAOSP-devices/android_device_google_raviole/commit/cee1e28a7fdebfe4327d4e70a14e71c663f94ce8)
+- [Use a more performant efficient freq for little cluster](https://github.com/AxionAOSP-devices/android_device_google_raviole/commit/21628b8188c19d5ef141d940c9fe1c7312ab0469)
+
+### How the Boost Works
+When a fling gesture or animation-heavy action (e.g., entering Quick Settings) is detected:
+- The system enters a combined **`LAUNCH` + `FIXED_PERFORMANCE`** mode.
+- These modes persist throughout the fling/animation duration, plus an additional **160ms** buffer (for fling).
+- Once the fling/animation ends, both hints are disabled.
+
+This approach boosts animation-critical resources like CPU/devfreq.
+
+> **Note:** Scrolling boosts are automatically disabled during game sessions, mirroring QCOM's behavior to avoid unnecessary resource contention.
+
+### Benefits
+- Smoother fling and scroll performance
+- Improved UI animation responsiveness
+- Reduced power consumption during scrolls by locking into efficient frequency ranges
+
+The reference uses efficiency curves derived from:
+- [kdrag0n/freqbench](https://github.com/kdrag0n/freqbench/blob/master/results/gs101/main/run.log) to pick optimal frequency ranges for the raviole's SoC (gs101).
+
+---
+
+## 2. Screen-Off & Idle Power Optimizations
+
+To reduce thermal buildup and improve deep sleep efficiency, AxionOS applies the **`LOW_POWER`** hint when the device enters screen-off states.
+
+### 🔗 Reference
+- [`LOW_POWER` hint usage on Pixel 7 (panther)](https://github.com/AxionAOSP-devices/android_device_google_pantah/blob/lineage-23.0/powerhint-panther.json#L1827)
+
+### Recommendations for Device Maintainers
+Device maintainers can further optimize the `LOW_POWER` hint to:
+- Lower idle frequencies across CPU/GPU
+- Encourage faster transition to **C1** or deeper sleep states
+- Reduce thermal trip points on Pixel/GS SoCs
+
+---
+
+### 📝 Summary
+
+| Feature                          | Description                                                       |
+|----------------------------------|-------------------------------------------------------------------|
+| `libperfmgr` fling/scroll boost | Uses `LAUNCH + FIXED_PERFORMANCE` for responsive scrolls         |
+| Game-aware behavior             | Disables scroll boosts during game sessions                      |
+| Efficient frequency tuning      | Uses real-world benchmarks to optimize power/performance tradeoffs |
+| `LOW_POWER` screen-off hint     | Reduces thermal and power draw during idle                       |
+
+---
+
+These optimizations are live by default on supported Pixel and Axion-supported devices. Builders are encouraged to fine-tune these power hints for their specific SoC behavior to get the best out of AxionOS.
+
+## 📦 Including LOS Prebuilts
+Wether to include LineageOS prebuilt apps (false by default)
+
+```make
+TARGET_INCLUDES_LOS_PREBUILTS := true/false
+```
+
+---
+
+### ⚙️ Optional: Enabling `SCHED_DEBUG` for Kernel Scheduler Tuning
+
+For non-prebuilt/inline built kernels, you can optionally enable `CONFIG_SCHED_DEBUG` to allow AxionOS to tune scheduler behavior. This is particularly useful for AxionOS load balancing, task migration, and latency optimizations.
+
+To enable it, add/set the following to your kernel's `.config` file:
+
+```config
+CONFIG_SCHED_DEBUG=y
+```
+---
+
+## Resolving AxionOS Kernel Tuning/Performance Mode Denials
+
+Some device trees may encounter kernel tuning denials when accessing certain sysfs nodes. This is often due to differences in OEM labeling that conflict with the labels defined in **device/lineage/sepolicy**. To resolve these issues, please follow one of the two approaches below:
+
+### 1. Standard Labeling Rules
+
+For devices where you can use the standard labels, add the following **genfscon** rules to your device tree:
+
+```genfs_context
+genfscon proc /sys/vm/dirty_writeback_centisecs     u:object_r:proc_dirty:s0
+genfscon proc /sys/vm/vfs_cache_pressure            u:object_r:proc_drop_caches:s0
+genfscon proc /sys/vm/dirty_ratio u:object_r:proc_dirty:s0
+genfscon proc /sys/kernel/sched_migration_cost_ns u:object_r:proc_sched:s0
+```
+
+These rules ensure that the appropriate security contexts are applied to the sysfs nodes, allowing proper kernel tuning without triggering denials.
+
+### 2.OEM Labeling Adjustments
+If your device tree already uses different OEM labels (for example, on MediaTek devices where /sys/vm/dirty_writeback_centisecs is labeled as u:object_r:proc_vm_dirty:s0, while on Qualcomm devices, /sys/vm/dirty-ratio is labeled as u:object_r:proc_dirty_ratio:s0), do not reassign the label in device/sepolicy. Instead, add an allow rule in your device-specific policy to grant the necessary permissions. For instance, for MediaTek/Qualcomm devices, include the following:
+
+```init.te
+allow init proc_vm_dirty:file rw_file_perms;
+allow init proc_dirty_ratio:file rw_file_perms;
+```
+This rule permits the init process to access the file with the required read/write permissions, thereby avoiding compilation breakage caused by conflicting label definitions.
+
+Note: These is needed to assure that AxionOS kernel tunings were applied
+
+---
+
+## Building AxionOS
+
+### 🔑 Generate Private Keys
+
+Before building, generate private keys:
+
+```bash
+gk -s
+```
+
+### 📲 Lunch Command
+
+To configure the build environment for your device, use:
+
+```bash
+axion <device_codename>
+```
+
+By default, the build system compiles a **vanilla** (non-GMS) build. If you want to include **Google Mobile Services (GMS)**, specify the variant:
+
+```bash
+axion <device_codename> <variant>
+```
+
+- **gms core** → Includes **Google Mobile Services with Google Telephony** (GApps) (enabled by default if gms variant is unspecified).
+- **gms pico** → Includes **Minimal Google Mobile Services** (GApps).
+- **va** → Vanilla (GMS-free) build.
+
+**Example:**
+To build for a device with codename `panther` and include GMS pico:
+
+```bash
+axion panther gms pico
+```
+
+To build for a device with codename `panther` with GMS removed:
+
+```bash
+axion panther va
+```
+
+### 🔄 Syncing Source
+
+After setting up the build environment and syncing the whole source, easily sync the latest source changes with:
+
+```bash
+axionSync
+```
+
+### ⚙️ Build for device
+
+Compile the ROM with brunch:
+
+```bash
+ax -br -j<count>
+```
+
+Replace `<count>` with the number of CPU threads for faster compilation (e.g., `ax -j16`).
+
+---
+
+## 📜 Credits
+
+AxionOS is built upon the hard work of the **Android Open Source Project (AOSP)** and **LineageOS** teams. Special thanks to all contributors!
+
+---
+
+🚀 Happy Building!
